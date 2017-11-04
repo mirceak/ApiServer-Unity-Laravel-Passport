@@ -329,6 +329,7 @@ function register(Request $request)
             'level' => '0',
             'xp' => '0',
             'fbId' => null,
+            'guestName' => null,
         ]);
     }else if ($request->fbId != null){
         /**
@@ -360,21 +361,34 @@ function register(Request $request)
             'level' => '0',
             'xp' => '0',
             'fbId' => $data['fbId'],
+            'guestName' => null,
         ]);
     }else{//the user is a guest
-        $username = "Guest_".(User::all()->last() ? User::all()->last()->id ++ : 1);
-        $randomPassword = substr(str_shuffle(str_repeat($x=$username, ceil(8/strlen($x)) )),1,8);
+        $valid = validator($request->only('guestName', 'password'), [
+            'guestName' => 'required|string|max:255|unique:users',
+        ]);
+
+        if ($valid->fails()) {
+            $jsonError=response()->json($valid->errors()->all(), 400);
+            return \Response::json($jsonError);
+        }
+
+        $data = request()->only('guestName');
+
+        $guestName = $data['guestName'];
+        $name = "Guest_".(User::all()->last() ? User::all()->last()->id ++ : 1);
 
         $user = User::create([
-            'name' => $username,
+            'name' => $name,
             'email' => null,
-            'password' => $randomPassword,
+            'password' => bcrypt($guestName),
             'highscore' => '0',
             'game_money' => '0',
             'money' => '0',
             'level' => '0',
             'xp' => '0',
             'fbId' => null,
+            'guestName' => $guestName,
         ]);
     }
 
@@ -387,7 +401,7 @@ registered with our own api/an facebook account. If we have an ```email``` parra
 user registered using our api and we validate the input then create a user based on that input and store it in our database. If we have
 an ```fbId``` in the ```$request``` parameter then we treat that request accodringly as we did with the previous one. If there are none
 of the above present we then know the user does not want to register so we register him with a guest account meaning we generate and
-assign him the data he did not want to provide us with. After all that is done we return a success message to the app client.
+assign him the data he did not want to provide us with. Within our client we will generate a unique id when the app is first run and store it so we can use it instead of a password and email or fbId. After all that is done we return a success message to the app client.
 ```
 
 Right now we set the user to have some fields we did not discuss for example the ```highscore / game money``` and so on. We need to
