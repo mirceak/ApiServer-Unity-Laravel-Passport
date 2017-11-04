@@ -2,12 +2,13 @@
 
 namespace App;
 
+use Laravel\Passport\HasApiTokens;
 use Illuminate\Notifications\Notifiable;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 
 class User extends Authenticatable
 {
-    use Notifiable;
+    use HasApiTokens, Notifiable;
 
     /**
      * The attributes that are mass assignable.
@@ -15,7 +16,8 @@ class User extends Authenticatable
      * @var array
      */
     protected $fillable = [
-        'name', 'email', 'password',
+        'name', 'password', 'email', 'highscore', 'game_money', 'money', 'fbId',
+        'xp', 'level', 'guestName',
     ];
 
     /**
@@ -26,4 +28,17 @@ class User extends Authenticatable
     protected $hidden = [
         'password', 'remember_token',
     ];
+
+    /**
+     * The attributes that should be guarded.
+     *
+     * @var array
+     */
+    protected $guarded = [
+    ];
+
+    //the user will be able to login using either email or fbId or a guest account
+    public function findForPassport($identifier) {
+        return $this->orWhere('email', $identifier)->orWhere('fbId', $identifier)->orWhere('guestName', $identifier)->first();
+    }
 }

@@ -13,6 +13,9 @@ use Illuminate\Http\Request;
 |
 */
 
+Route::post('/register', 'Api\ApiController@register');
+Route::middleware('auth:api')->get('/logout', 'Api\ApiController@logout');
+
 Route::middleware('auth:api')->get('/user', function (Request $request) {
-    return $request->user();
+    return $request->user()->toJson();
 });
