@@ -51,7 +51,8 @@ That's it for this step. You are now hosting your very own mysql database and ph
 * Paste in this code ( ```composer global require "laravel/installer"``` )
 * Paste in this code ( ```laravel new Tutorial_Server``` ). It will take some time so wait for it to finish.
 * Paste in this code ( ```cd Tutorial_Server``` )
-* Paste in this code ( ```php artisan serve --host=0.0.0.0 --port=8080``` ). This will start a laravel server on your http://localhost:8080. You can specify your public ip instead of the "0.0.0.0" when you want your server available to the public.
+* Paste in this code ( ```php artisan serve --host=0.0.0.0 --port=8080``` ). This will start a laravel server on your http://localhost:8080. 
+You can specify your public ip instead of the "0.0.0.0" when you want your server available to the public.
 
 You are now hosting your very own website! But this is not what we want so we need to move on because there is alot of fun ahead of us!
 
@@ -401,7 +402,8 @@ registered with our own api/an facebook account. If we have an ```email``` parra
 user registered using our api and we validate the input then create a user based on that input and store it in our database. If we have
 an ```fbId``` in the ```$request``` parameter then we treat that request accodringly as we did with the previous one. If there are none
 of the above present we then know the user does not want to register so we register him with a guest account meaning we generate and
-assign him the data he did not want to provide us with. Within our client we will generate a unique id when the app is first run and store it so we can use it instead of a password and email or fbId. After all that is done we return a success message to the app client.
+assign him the data he did not want to provide us with. Within our client we will generate a unique id when the app is first run and
+store it so we can use it instead of a password and email or fbId. After all that is done we return a success message to the app client.
 ```
 
 Right now we set the user to have some fields we did not discuss for example the ```highscore / game money``` and so on. We need to
@@ -569,4 +571,1338 @@ class ChangeEmailInUsers extends Migration
 
 ## Now it's time to move on to Unity and create some sort of logic that we will use to communicate with the server.
 
+
+First thing is first, we need a server class that will hold all the data we need to handle the server like an api_user class and stull like that.
+
+* Create a new unity project and name it ```"Tutorial_Client"```.
+* In the assets folder create a ```"Resources"``` folder. In that folder create a ```"Scripts"``` folder. In that folder create a 
+```"ServerApi"``` folder. In that folder create a ```"SecuredData"``` folder. In the ```"SecuredData"``` folder create two C# scripts named ```"Api_User"``` 
+and ```"Api_Data"```.
+* Open up the Api_Data class and paste this:
+```
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using System;
+
+[Serializable]
+public class Api_Data  {
+    //made null in logout api call
+    public Api_User user;    
+    //Api_UserData class is defined inside Api_User
+    public Api_UserData userData;
+
+    public Api_Data()
+    {
+        user = new ApiUser();
+        userData = new ApiUserData();
+    }
+}
+
+# This class will hold all the information we request from the internet.
+```
+
+* Open up the Api_User class and paste this:
+```
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using System;
+
+[Serializable]
+public class Api_User
+{
+    public string access_token;
+    public string refresh_token;
+
+    public string name;
+    public string email;
+    public string password;
+    public string fbId;
+    public string highscore;
+    public string game_money;
+    public string money;
+    public string xp;
+    public string level;
+    public string guestName;
+    public string created_at;
+    public string updated_at;
+}
+
+public class Api_UserData
+{
+    public Texture2D texture_profilePic;
+}
+```
+
+All right, now we have something that can hold what we have setup inside our server. Now let's define some constants for it.
+
+* In the ```"SecuredData"``` folder we need to create a ```"Server_Constants"``` C# class.
+* In that file paste this:
+```
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+public class Server_Constants
+{
+    public const string serverApi_BaseUrl = "http://127.0.0.1:8080";
+    
+    //we use this identifier to register the client as a guest when he first opens the application.
+    protected static string uniqueIdentifier;
+    public static string GetUniqueIdentifier{
+        get
+        {
+            if (uniqueIdentifier == null)
+            uniqueIdentifier = PlayerPrefs.HasKey("uniqueIdentifier") ? PlayerPrefs.GetString("uniqueIdentifier") : GetUniqueID();
+
+            return uniqueIdentifier;
+        }
+    }
+    private static string GetUniqueID()
+    {
+        string key = "ID";
+
+        var random = new System.Random();
+        DateTime epochStart = new System.DateTime(1970, 1, 1, 8, 0, 0, System.DateTimeKind.Utc);
+        double timestamp = (System.DateTime.UtcNow - epochStart).TotalSeconds;
+
+        string uniqueID = Application.systemLanguage                            //Language
+                + "-" + Application.platform                                            //Device    
+                + "-" + String.Format("{0:X}", Convert.ToInt32(timestamp))                //Time
+                + "-" + String.Format("{0:X}", Convert.ToInt32(Time.time * 1000000))        //Time in game
+                + "-" + String.Format("{0:X}", random.Next(1000000000));                //random number
+        
+        if (PlayerPrefs.HasKey(key))
+        {
+            uniqueID = PlayerPrefs.GetString(key);
+        }
+        else
+        {
+            PlayerPrefs.SetString(key, uniqueID);
+            PlayerPrefs.Save();
+        }
+
+        return uniqueID;
+    }
+}
+# This class holds the information we need to be able to connect to the server.
+```
+
+All right, we're all set up with where we're going to store information from the server and what information we actually need from it. 
+Now let's make our first request. In order to do this we should create some sort of interface to handle api calls since they all have
+many things in common like the fact that they need to have some sort of beginning and end callbacks and some should be able to refresh
+the server token and so on.
+
+The purpose of this tutorial is to get as much people as possible to build their own client server project. In order to do so I decided 
+to build api calls as GameObjects within unity so that destroying them would go smoothly and so that debugging would not be a problem
+even for a novice user.
+
+First we should build a manager for the api calls we are going to make.
+* Inside the ```"ServerApi"``` folder create a new C# class named Manager_Api_Call.
+* Inside that class paste this:
+```
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+public class Manager_Api_Call {
+
+    List<Api_Call_Params> calls = new List<Api_Call_Params>();
+
+    public void Generate_ApiCall(JSONObject data = null, System.Action<JSONObject> callback = null, string type = null)
+    {
+        Server._LoadingStart();
+
+        //we generate an empty gameObject that will have an apiCall attached to it
+        //after the api call is done the object will self destruct and if callback!=null will callback()
+        GameObject go = new GameObject();
+
+        //add the apiCall component to the game object and remember the info we need to initialize the call class
+        Api_Call call = null;
+        switch (type) {
+            case api_register:
+                call = go.AddComponent<Register>();
+                break;
+            case api_login:
+                call = go.AddComponent<Login>();
+                break;
+            case api_logout:
+                call = go.AddComponent<Logout>();
+                break;
+            case api_refreshToken:
+                call = go.AddComponent<RefreshToken>();
+                break;
+            case api_registerFacebook:
+                call = go.AddComponent<RegisterFacebook>();
+                break;
+            case api_registerGuest:
+                call = go.AddComponent<RegisterGuest>();
+                break;
+            case api_userProfileDetails:
+                call = go.AddComponent<UserProfileDetails>();
+                break;
+        }
+        go.name = type;
+
+        //create a params field and add it to the list and to the call so we can access it later.
+        Api_Call_Params callParams = new Api_Call_Params(call, callback, data, type);
+        calls.Add(callParams);
+        callParams.id = Random.ColorHSV().ToString() + Time.realtimeSinceStartup.ToString();
+        call.callParams = callParams;
+
+        //we only want to start one call at a time for this project so we need to check if there are any calls running or if we are just refreshing a token
+        //the rest of the calls added to the list will be called after the last call dies
+        if (calls.Count == 1 || call is RefreshToken)
+        {
+            Server.instance.StartCoroutine(call.Initialize(data, ApiCallback));
+        }
+    }
+    void ApiCallback(JSONObject data)
+    {
+        // we override this to setup the refreshToken logic
+        if (data.HasField("error"))
+        {
+            //we check if we need to refresh the token
+            if (data.GetField("error").str.Contains("401 Unauthorized"))
+            {
+                Debug.Log("Refreshing");
+                RefreshToken();
+                return;
+            }
+
+        }
+
+        //we call the current call's callback
+        if (calls.Count != 0)
+            calls[0].callback(data);
+    }
+
+    public void RefreshToken()
+    {
+        BuildRefreshToken();
+    }
+    public void DestroyCall(Api_Call call)
+    {
+        //whenever a call dies out we check if there are any other calls we need to make for example we use this 
+        //system when we refresh the token: the call gets a unauthorized error, then we skip destroying the call 
+        //and instantiate and initiate a refresh call that will die out and reach this method. after that it will
+        //reininitate the original call and all flows the same way until there are no more calls left in the stack
+
+        //get rid of the refference
+        calls.Remove(call.callParams);
+        call = null;
+
+        if (calls.Count != 0) //if there are any calls left we initiate the first one
+        {
+            Api_Call_Params current_call_params;
+            current_call_params = calls[0];
+            Server.instance.StartCoroutine(current_call_params.call.Initialize(current_call_params.data, ApiCallback));
+        }
+        else
+        {
+            //there are no more calls to make resume app
+            Server._LoadingEnd();
+        }
+    }
+    void BuildRefreshToken()
+    {
+        //we create a simple refresh token request using the info we have stored about the user.
+        //if the user does not exist we return an error
+        if (Server.apiData.user.refresh_token != null)
+        {
+            JSONObject data = new JSONObject();
+            data.AddField("grant_type", "refresh_token");
+            data.AddField("refresh_token", Server.apiData.user.refresh_token);
+            data.AddField("client_id", Server.client_id);
+            data.AddField("client_secret", Server.client_secret);
+            data.AddField("scope", "");
+
+            Generate_ApiCall(data, RefreshedToken, api_refreshToken);
+        }
+        else
+        {
+            //we should not be in here, there is no user logged in!
+            ApiCallback(new JSONObject("{ "+'"'+ "error" + '"' + " : " + '"' + " No user! " + '"' + " }"));
+            calls[0].call.DestroySelf();
+        }
+    }
+    void RefreshedToken(JSONObject data)
+    {
+        Debug.Log("RefreshedToken");
+
+        if (data.HasField("error"))
+        {
+            //error from api
+            Debug.Log(data.GetField("error").str);
+            ApiCallback(new JSONObject("{ " + '"' + "error" + '"' + " : " + '"' + " token refresh error! " + '"' + " }"));
+            calls[0].call.DestroySelf();
+        }
+        else
+        {
+            //data from api
+            Debug.Log(data.GetField("data").str);
+            //we don't need to do anything here because after the refresh token dies out it will reinitiate the api call that got locked
+        }
+    }
+
+    //api calls...
+    const string api_register = "Register";
+    const string api_registerGuest = "RegisterGuest";
+    const string api_registerFacebook = "RegisterFacebook";
+    const string api_login = "Login";
+    const string api_userProfileDetails = "UserProfileDetails";
+    const string api_logout = "Logout";
+    const string api_refreshToken = "RefreshToken";
+
+    //public api calls
+    public void Register(JSONObject data, System.Action<JSONObject> callback)
+    {
+        Generate_ApiCall(data, callback, api_register);
+    }
+    public void RegisterGuest(JSONObject data, System.Action<JSONObject> callback)
+    {
+        Generate_ApiCall(data, callback, api_registerGuest);
+    }
+    public void RegisterFacebook(JSONObject data, System.Action<JSONObject> callback)
+    {
+        Generate_ApiCall(data, callback, api_registerFacebook);
+    }
+    public void Login(JSONObject data, System.Action<JSONObject> callback)
+    {
+        Generate_ApiCall(data, callback, api_login);
+    }
+    //
+
+    //for registered users
+    public void UpdateUser(JSONObject data)
+    {
+        Server.apiData.user = JsonUtility.FromJson<Api_User>(data.Print());
+    }
+    public void UserProfileDetails(System.Action<JSONObject> callback)
+    {
+        Generate_ApiCall(null, callback, api_userProfileDetails);
+    }
+    public void Logout(System.Action<JSONObject> callback)
+    {
+        Generate_ApiCall(null, callback, api_logout);
+    }
+    //
+}
+# The code is pretty well commented out so feel free to look around and understand the logic.
+```
+
+* Inside the ```"ServerApi"``` folder create a new folder named ```"Objects"``` and in that one create a folder named ```"Api"```. 
+Inside Api create a C# class named ```"Api_Call"```.
+* Inside that class paste this:
+```
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+public class Api_Call_Params {
+
+    public Api_Call call = null;
+    public System.Action<JSONObject> callback = null;
+    public JSONObject data = null;
+    public string type = null;
+    public string id;
+
+    public Api_Call_Params(Api_Call _call, System.Action<JSONObject> _callback, JSONObject _data, string _type)
+    {
+        call = _call;
+        callback = _callback;
+        data = _data;
+        type = _type;
+    }
+}
+# we use this class to help remember what api calls we have to make
+```
+
+Great! Now we have a functioning manager but we need actual calls.
+
+* Create a C# class named ```"Api_call"``` now inside the ```"Api"``` folder.
+* Inside Api_call.cs paste this:
+```
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+public abstract class Api_Call : MonoBehaviour {
+    
+    //api call details
+    public string url;
+    public JSONObject status = new JSONObject();
+
+    public Api_Call_Params callParams;
+    //
+    
+    protected System.Action<JSONObject> _callback;
+        
+    public IEnumerator Initialize(JSONObject data, System.Action<JSONObject> callback)
+    {
+        status.Clear();
+        _callback = callback;
+        //we call the inheriting class's Call method. this is set in other classes not this one
+        yield return Call(data);
+
+        //after the call has returned a message from the server we destroy the object. some classes will redefine this "Die" method
+        Die();
+    }
+
+    public abstract IEnumerator Call(JSONObject data);
+
+    public virtual void Die()
+    {
+        if (status.HasField("error") && !status.GetField("error").str.Contains("401 Unauthorized"))
+        {
+            //something went wrong we should not be here.
+            Debug.Log("Something went wrong with the request: " + status.GetField("error").str);
+        }else if (status.HasField("error") && status.GetField("error").str.Contains("401 Unauthorized"))
+        {
+            if (_callback != null)
+                _callback(status);
+            return;
+        }
+
+        //if this call should call another function when it's finished it should do so now
+        if (_callback != null)
+            _callback(status);
+
+        DestroySelf();
+    }
+
+    public void DestroySelf()
+    {
+        //the end callback function can be used in classes that inherit this one to set custom event logic when this call is done loading. 
+        you will set whatever you want to happen
+        //at the end of each callback in the api call class that will inherit this one. you will use "public override void EndCallback() { code }".
+        EndCallback();
+
+        //we remove the call from the stack
+        Server.manager_Api_Call.DestroyCall(this);
+
+        //we remove the object for good
+        GameObject.Destroy(gameObject);
+    }
+
+    public virtual void EndCallback() { }
+}
+# The code is pretty well commented out so feel free to look around and understand the logic. 
+```
+
+Awesome we're almost ready to make our first call to the server.
+
+* Inside the ```"ServerApi"``` folder create a new c# class named ```"Server"```.
+* Inside Server.cs paste this:
+```
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+public class Server : MonoBehaviour
+{
+    public static Api_Data apiData = new Api_Data(); //this should be saved and loaded with playerprefs for offline play if it is desired (not safe, files could get hacked)
+
+    public static Server instance;
+
+    public static Manager_Api_Call manager_Api_Call = new Manager_Api_Call();
+    private void Start()
+    {
+        instance = this;
+    }
+
+    //api client details
+    public const string grant_type = "password"; //leave this as it is!
+    public const string client_id = "YOUR CLIENT ID HERE!!! INSTRUCTIONS IN THE # SECITON AT THE BOTTOM OF THIS STEP!!!";
+    public const string client_secret = "YOUR CLIENT SECRET HERE!!! INSTRUCTIONS IN THE # SECTION AT THE BOTTOM OF THIS STEP!!!";
+    //
+
+    //callbacks for ui
+    //we check if isLoading because we don't want the loadingStart ui callback to trigger when we start
+    //the login api call right after registering. the register apiCall expects an immediate call to the login api call
+    public static void _LoadingStart()
+    {
+        if (isLoading) return;
+        isLoading = true;
+        Debug.Log("Started Loading");
+        if (LoadingStart != null)
+        {
+            LoadingStart();
+        }
+    }
+    protected static bool isLoading = false;
+    protected static System.Action LoadingStart;
+    protected static System.Action LoadingEnd;
+    public static void _LoadingEnd()
+    {
+        if (!isLoading) return;
+        isLoading = false;
+        Debug.Log("Stopped Loading");
+        if (LoadingEnd != null)
+        {
+            LoadingEnd();
+        }
+    }
+    //
+    public static void Register(JSONObject data, System.Action<JSONObject> callback)
+    {
+        manager_Api_Call.Register(data, callback);
+    }
+    public static void RegisterGuest(JSONObject data, System.Action<JSONObject> callback)
+    {
+        manager_Api_Call.RegisterGuest(data, callback);
+    }
+    public static void RegisterFacebook(JSONObject data, System.Action<JSONObject> callback)
+    {
+        manager_Api_Call.RegisterFacebook(data, callback);
+    }
+    public static void Login(JSONObject data, System.Action<JSONObject> callback)
+    {
+        manager_Api_Call.Login(data, callback);
+    }
+    
+    //for registered users
+    public static void UserProfileDetails(System.Action<JSONObject> callback)
+    {
+        manager_Api_Call.UserProfileDetails(callback);
+    }
+    public static void Logout(System.Action<JSONObject> callback)
+    {
+        manager_Api_Call.Logout(callback);
+    }
+    //
+
+    //Example functions...
+
+    //facebook functions
+    public void FacebookInit()
+    {
+        facebookManager.FBInit();
+    }
+
+    UnityEngine.UI.Button firstFriendPictureButton;
+    public void GetFirstFriendUserPicture(UnityEngine.UI.Button targetButton)
+    {
+        firstFriendPictureButton = targetButton;
+        Debug.Log("GetFirstFriendUserPicture");
+        _LoadingStart();
+        JSONObject firstUserFriend = facebookManager.facebookUser.friendsList[0];
+        facebookManager.GetUserPicture(FacebookFinishedGetUserPicture, firstUserFriend.GetField("id").str);
+    }
+
+    public void FacebookFinishedGetUserPicture(Texture2D result)
+    {
+        Debug.Log("FacebookFinishedGetUserPicture");
+        firstFriendPictureButton.image.sprite = Sprite.Create(result, new Rect(0, 0, 100, 100), new Vector2(.5f, .5f));
+        _LoadingEnd();
+    }
+
+    public void FacebookFriends()
+    {
+        Debug.Log("FacebookFriends");
+        _LoadingStart();
+        facebookManager.GetFriends(FacebookFinishedFriends);
+    }
+
+    public void FacebookFinishedFriends(JSONObject result)
+    {
+        Debug.Log("FacebookFinishedFriends");
+        Debug.Log(result);
+        _LoadingEnd();
+    }
+
+    public void FacebookLogin()
+    {
+        Debug.Log("FacebookLogin");
+        _LoadingStart();
+        facebookManager.Login(FacebookFinishedLogin);
+    }
+
+    public void FacebookFinishedLogin(JSONObject result)
+    {
+        Debug.Log("FacebookFinishedLogin");
+        Debug.Log(result);
+        facebookManager.GetUserName(FacebookFinishedUsername);
+    }
+
+    public void FacebookFinishedUsername(JSONObject result)
+    {
+        Debug.Log("FacebookFinishedUsername");
+        Debug.Log(result);
+        RegisterFacebookLogin();
+    }
+
+    void RegisterFacebookLogin()
+    {
+        Debug.Log("RegisterFacebookLogin");
+        JSONObject data = new JSONObject();
+        data.AddField("name", facebookManager.facebookUser.name);
+        data.AddField("fbId", facebookManager.facebookUser.user_id);
+        data.AddField("password", Server_Constants.GetUniqueIdentifier);
+
+        RegisterFacebook(data, OnRegisterFacebookLoginEnd);
+    }
+    void OnRegisterFacebookLoginEnd(JSONObject status)
+    {
+        Debug.Log("RegisteredFacebookLogin");
+        if (status.HasField("error"))
+        {
+            //error from api
+            Debug.Log(status.GetField("error").str);
+
+            JSONObject error = new JSONObject(status.GetField("error").str);
+            if (error.GetField("original")[0].str.Contains("The fb id has already been taken"))
+            {
+                //we already registered the user
+                LoginFacebookLogin();
+            }
+            else
+            {
+                //something went wrong
+                _LoadingEnd();
+            }
+        }
+        else
+        {
+            //data from api
+            Debug.Log(status.GetField("data").str);
+            
+            LoginFacebookLogin();
+        }
+    }
+    void LoginFacebookLogin()
+    {
+        JSONObject data = new JSONObject();
+        data.AddField("username", facebookManager.facebookUser.user_id);
+        data.AddField("password", Server_Constants.GetUniqueIdentifier);
+        data.AddField("scope", "");
+
+        Login(data, OnLoginFacebookLoginEnd);
+    }
+    void OnLoginFacebookLoginEnd(JSONObject status)
+    {
+        Debug.Log("LoggedInFacebookLogin");
+        if (status.HasField("error"))
+        {
+            //error from api
+            Debug.Log(status.GetField("error").str);
+
+            _LoadingEnd();
+        }
+        else
+        {
+            //data from api
+            Debug.Log(status.GetField("data").str);
+
+            _LoadingEnd();
+        }
+    }
+    //
+
+    //Login Function
+    public void FakeLoginUser()
+    {
+        LoginUser("first@mail.com", "password");
+    }
+    public void LoginUser(string username, string password, string scope = "")
+    {
+        JSONObject data = new JSONObject();
+        data.AddField("username", username);
+        data.AddField("password", password);
+        data.AddField("scope", scope);
+
+        DoLoginUser(data);
+    }
+    void DoLoginUser(JSONObject data)
+    {
+        Server.Login(data, OnLoginEnd);
+    }
+    void OnLoginEnd(JSONObject status)
+    {
+        Debug.Log("LoggedIn");
+        if (status.HasField("error"))
+        {
+            //error from api
+            Debug.Log(status.GetField("error").str);
+        }
+        else
+        {
+            //data from api
+            Debug.Log(status.GetField("data").str);
+
+        }
+    }
+    //
+
+    //Login Function
+    public void FakeFacebookLogin()
+    {
+        FacebookLogin("first@mail.com", "password");
+    }
+    public void FacebookLogin(string username, string password, string scope = "")
+    {
+        JSONObject data = new JSONObject();
+        data.AddField("username", username);
+        data.AddField("password", password);
+        data.AddField("scope", scope);
+
+        DoFacebookLogin(data);
+    }
+    void DoFacebookLogin(JSONObject data)
+    {
+        Server.Login(data, OnFacebookLoginEnd);
+    }
+    void OnFacebookLoginEnd(JSONObject status)
+    {
+        Debug.Log("LoggedIn");
+        if (status.HasField("error"))
+        {
+            //error from api
+            Debug.Log(status.GetField("error").str);
+        }
+        else
+        {
+            //data from api
+            Debug.Log(status.GetField("data").str);
+
+        }
+    }
+    //
+
+    //Register Function
+    public void FakeRegisterUser()
+    {
+        RegisterUser("first", "first@mail.com", "password");
+    }
+    public void RegisterUser(string name, string email, string password)
+    {
+        JSONObject data = new JSONObject();
+        data.AddField("name", name);
+        data.AddField("email", email);
+        data.AddField("password", password);
+
+        DoRegisterUser(data);
+    }
+    void DoRegisterUser(JSONObject data)
+    {
+        Server.Register(data, OnRegisterEnd);
+    }
+    void OnRegisterEnd(JSONObject status)
+    {
+        Debug.Log("Registered");
+        if (status.HasField("error"))
+        {
+            //error from api
+            Debug.Log(status.GetField("error").str);
+        }
+        else
+        {
+            //data from api
+            Debug.Log(status.GetField("data").str);
+
+            //the Register api call expects an immediate call to the Login api call
+            FakeLoginUser();
+        }
+    }
+    //
+
+    //RegisterGuest Function
+    public void FakeRegisterGuestUser()
+    {
+        RegisterGuestUser("first", "first@mail.com", "password");
+    }
+    public void RegisterGuestUser(string name, string email, string password)
+    {
+        JSONObject data = new JSONObject();
+        data.AddField("guestName", Server_Constants.GetUniqueIdentifier);
+
+        DoRegisterGuestUser(data);
+    }
+    void DoRegisterGuestUser(JSONObject data)
+    {
+        Server.RegisterGuest(data, OnRegisterGuestEnd);
+    }
+    void OnRegisterGuestEnd(JSONObject status)
+    {
+        Debug.Log("Registered Guest");
+        if (status.HasField("error"))
+        {
+            //error from api
+            Debug.Log(status.GetField("error").str);
+        }
+        else
+        {
+            //data from api
+            Debug.Log(status.GetField("data").str);
+
+            //the Register api call expects an immediate call to the Login api call
+            FakeLoginGuestUser();
+        }
+    }
+    //
+
+    //Login Guest Function
+    public void FakeLoginGuestUser()
+    {
+        LoginGuestUser();
+    }
+    public void LoginGuestUser()
+    {
+        JSONObject data = new JSONObject();
+        data.AddField("username", Server_Constants.GetUniqueIdentifier);
+        data.AddField("password", Server_Constants.GetUniqueIdentifier);
+        data.AddField("scope", "");
+
+        DoLoginGuestUser(data);
+    }
+    void DoLoginGuestUser(JSONObject data)
+    {
+        Server.Login(data, OnLoginGuestEnd);
+    }
+    void OnLoginGuestEnd(JSONObject status)
+    {
+        Debug.Log("LoggedIn Guest");
+        if (status.HasField("error"))
+        {
+            //error from api
+            Debug.Log(status.GetField("error").str);
+        }
+        else
+        {
+            //data from api
+            Debug.Log(status.GetField("data").str);
+        }
+    }
+    //
+
+    //UserDetails Function
+    public void FakeUserProfileDetails()
+    {
+        DoUserProfileDetails();
+    }
+    void DoUserProfileDetails()
+    {
+        Server.UserProfileDetails(OnUserProfileDetailsEnd);
+    }
+    void OnUserProfileDetailsEnd(JSONObject status)
+    {
+        Debug.Log("UserProfileDetails");
+        if (status.HasField("error"))
+        {
+            //error from api
+            Debug.Log(status.GetField("error").str);
+        }
+        else
+        {
+            //data from api
+            Debug.Log(status.GetField("data").str);
+        }
+    }
+    //
+
+    //Logout Function
+    public void FakeLogout()
+    {
+        DoFakeLogout();
+    }
+    void DoFakeLogout()
+    {
+        Server.Logout(OnFakeLogoutEnd);
+    }
+    void OnFakeLogoutEnd(JSONObject status)
+    {
+        Debug.Log("Logout");
+        if (status.HasField("error"))
+        {
+            //error from api
+            Debug.Log(status.GetField("error").str);
+        }
+        else
+        {
+            //data from api
+            Debug.Log(status.GetField("data").str);
+        }
+    }
+    //
+}
+# The code is pretty well commented out so feel free to look around and understand the logic. You have examples for about 
+everything you will need to login/register/view/edit a user.
+
+```
+
+Now we're all set to build and run the api calls we are using in the ```Server.cs``` we have just made.
+
+Let's create them one by one they are not that many:
+
+* First create a folder named ```"ApiCalls"``` in the folder named ```"ServerApi"```. Then create another folder named 
+```"Auth"``` (for authentification) in the ```ApiCalls``` folder.
+
+* Inside the ```Auth``` folder create a new c# class named ```"Register"``` and paste in this code:
+```
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+public class Register : Api_Call
+{
+    public override IEnumerator Call(JSONObject data)
+    {
+        url = Server_Constants.serverApi_BaseUrl + "/api/register";
+
+        WWWForm form = new WWWForm();
+        form.AddField("name", data.GetField("name").str);
+        form.AddField("email", data.GetField("email").str);
+        form.AddField("password", data.GetField("password").str);
+
+        WWW www = new WWW(url, form);
+
+        yield return www;
+        if (!string.IsNullOrEmpty(www.error))
+        {
+            status.AddField("error", www.error);
+        }
+        else
+        {
+            status.AddField("data", www.text);
+
+            JSONObject wwwData = new JSONObject(www.text);
+            if (wwwData.HasField("success"))
+            {
+                status.AddField("success", www.text);
+            }
+            else
+            {
+                //credentials already used (account details not unique)
+                status.AddField("error", www.text);
+            }
+        }
+    }
+
+    //we expect an immediate login api call after this request so we don't call the LoadingEnd UI callback
+    public override void EndCallback()
+    {
+    }
+}
+# Pretty straight forward, we make a form with the info we would need to register a user and then if we get a good 
+response we move on.
+```
+
+* Inside the ```Auth``` folder create a new c# class named ```"Login"``` and paste in this code:
+```
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+public class Login : Api_Call
+{
+    public override IEnumerator Call(JSONObject data)
+    {
+        url = Server_Constants.serverApi_BaseUrl + "/oauth/token";
+
+        WWWForm form = new WWWForm();
+        form.AddField("grant_type", Server.grant_type);
+        form.AddField("client_id", Server.client_id);
+        form.AddField("client_secret", Server.client_secret);
+        form.AddField("username", data.GetField("username").str);
+        form.AddField("password", data.GetField("password").str);
+
+        form.AddField("scope", data.GetField("scope").str);
+
+        WWW www = new WWW(url, form);
+
+        yield return www;
+        if (!string.IsNullOrEmpty(www.error))
+        {
+            status.AddField("error", www.error);
+        }
+        else
+        {
+            status.AddField("data", www.text);
+
+            JSONObject wwwData = new JSONObject(www.text);
+            JSONObject serverUserData = new JSONObject();
+            serverUserData.AddField("access_token", wwwData.GetField("access_token").str);
+            serverUserData.AddField("refresh_token", wwwData.GetField("refresh_token").str);
+            Server.manager_Api_Call.UpdateUser(serverUserData);
+        }
+    }
+}
+# Pretty straight forward, we make a form with the info we would need to login a user and then if we get a good 
+response we update our Api_User.
+```
+
+* Inside the ```Auth``` folder create a new c# class named ```"Logout"``` and paste in this code:
+```
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+public class Logout : Api_Call
+{
+    public override IEnumerator Call(JSONObject data = null)
+    {
+        url = Server_Constants.serverApi_BaseUrl + "/api/logout";
+
+        Hashtable headers = new Hashtable();
+        headers.Add("Accept", "application/json");
+        headers.Add("Authorization", "Bearer " + Server.apiData.user.access_token);
+        WWW www = new WWW(url, null, headers);
+
+        yield return www;
+        if (!string.IsNullOrEmpty(www.error))
+        {
+            status.AddField("error", www.error);
+        }
+        else
+        {
+            status.AddField("data", www.text);
+        }
+    }
+
+    public override void EndCallback()
+    {         
+        if (!status.HasField("error"))
+        {
+            Server.apiData.user = new Api_User();
+        }
+    }
+}
+# Pretty straight forward, we make a request with the info we would need to logout a user and then if we get a good 
+response we update our Api_User.
+```
+
+* Inside the ```Auth``` folder create a new c# class named ```"RefreshToken"``` and paste in this code:
+```
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+public class RefreshToken : Api_Call
+{
+    public override IEnumerator Call(JSONObject data)
+    {
+        url = Server_Constants.serverApi_BaseUrl + "/oauth/token";
+
+        WWWForm form = new WWWForm();
+        form.AddField("grant_type", data.GetField("grant_type").str);
+        form.AddField("refresh_token", data.GetField("refresh_token").str);
+        form.AddField("client_id", data.GetField("client_id").str);
+        form.AddField("client_secret", data.GetField("client_secret").str);
+        form.AddField("scope", data.GetField("scope").str);
+        WWW www = new WWW(url, form);
+
+        yield return www;
+        if (!string.IsNullOrEmpty(www.error))
+        {
+            status.AddField("error", www.error);
+        }
+        else
+        {
+            status.AddField("data", www.text);
+
+            JSONObject wwwData = new JSONObject(www.text);
+            JSONObject serverUserData = new JSONObject();
+            serverUserData.AddField("access_token", wwwData.GetField("access_token").str);
+            serverUserData.AddField("refresh_token", wwwData.GetField("refresh_token").str);
+            Server.manager_Api_Call.UpdateUser(serverUserData);
+        }
+    }
+}
+# Pretty straight forward, we make a form with the info we would need to refresh a token and then if we get a good 
+response we update our Api_User with the new token.
+```
+
+* Inside the ```Auth``` folder create a new c# class named ```"RegisterGuest"``` and paste in this code:
+```
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+public class RegisterGuest : Api_Call
+{
+
+    public override IEnumerator Call(JSONObject data)
+    {
+        url = Server_Constants.serverApi_BaseUrl + "/api/register";
+
+        WWWForm form = new WWWForm();
+        form.AddField("guestName", data.GetField("guestName").str);
+
+        WWW www = new WWW(url, form);
+
+        yield return www;
+        if (!string.IsNullOrEmpty(www.error))
+        {
+            status.AddField("error", www.error);
+        }
+        else
+        {
+            status.AddField("data", www.text);
+
+            JSONObject wwwData = new JSONObject(www.text);
+            if (wwwData.HasField("success"))
+            {
+                status.AddField("success", www.text);
+            }
+            else
+            {
+                //credentials already used (account details not unique)
+                status.AddField("error", www.text);
+            }
+        }
+    }
+
+    //we expect an immediate login api call after this request so we don't call the LoadingEnd UI callback
+    public override void EndCallback()
+    {
+
+    }
+}
+# Pretty straight forward, we make a request with the info we would need to register a guest user and then if we get a good 
+response we move on.
+```
+
+* Inside the ```Auth``` folder create a new c# class named ```"RegisterFacebook"``` and paste in this code:
+```
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+public class RegisterFacebook : Api_Call
+{
+    public override IEnumerator Call(JSONObject data)
+    {
+        url = Server_Constants.serverApi_BaseUrl + "/api/register";
+
+        WWWForm form = new WWWForm();
+        form.AddField("name", data.GetField("name").str);
+        form.AddField("fbId", data.GetField("fbId").str);
+        form.AddField("password", data.GetField("password").str);
+
+        WWW www = new WWW(url, form);
+
+        yield return www;
+        if (!string.IsNullOrEmpty(www.error))
+        {
+            status.AddField("error", www.error);
+        }
+        else
+        {
+            status.AddField("data", www.text);
+
+            JSONObject wwwData = new JSONObject(www.text);
+            if (wwwData.HasField("success"))
+            {
+                status.AddField("success", www.text);
+            }
+            else
+            {
+                //credentials already used (account details not unique)
+                status.AddField("error", www.text);
+            }
+        }
+    }
+
+    //we expect an immediate login api call after this request so we don't call the LoadingEnd UI callback
+    public override void EndCallback()
+    {
+    }
+}
+# Pretty straight forward, we make a request with the info we would need to register a facebook user and then if we get a good 
+response we move on.
+```
+
+* Inside the ```ApiCalls``` folder create a new c# class named ```"UserProfileDetails"``` and paste in this code:
+```
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+public class UserProfileDetails : Api_Call
+{
+    public override IEnumerator Call(JSONObject data = null)
+    {
+        url = Server_Constants.serverApi_BaseUrl + "/api/user";
+
+        Hashtable headers = new Hashtable();
+        headers.Add("Accept", "application/json");
+        headers.Add("Authorization", "Bearer " + Server.apiData.user.access_token);
+        WWW www = new WWW(url, null, headers);
+
+        yield return www;
+        if (!string.IsNullOrEmpty(www.error))
+        {
+            status.AddField("error", www.error);
+        }
+        else
+        {
+            status.AddField("data", www.text);
+        }
+    }
+}
+# Pretty straight forward, we make a request with the info we would need to register a facebook user and then if we get a good 
+response we move on.
+```
+
+Okay, now make sure you download the official ```Facebook beta``` app from the asset store in unity.
+
+* Inside the ```Scripts``` folder create a new folder named ```"Facebook"```.
+* Inside the ```Facebook``` folder create a new c# class named ```"FacebookUser"``` and paste in this code:
+```
+using System.Collections;
+using System.Collections.Generic;
+
+[System.Serializable]
+public class FacebookUser  {
+    public string permissions;
+    public string expiration_timestamp;
+    public string access_token;
+    public string user_id;
+    public string[] granted_permissions;
+    public string[] declined_permissions;
+    public string callback_id;
+    public string name;
+    public JSONObject friendsList;
+}
+# We use these params to remember our facebook info.
+```
+
+* Inside the ```Facebook``` folder create a new c# class named ```"FacebookUser"``` and paste in this code:
+```
+using System.Collections;
+using System.Collections.Generic;
+using Facebook.Unity;
+using UnityEngine;
+
+public class FacebookManager {
+
+    public FacebookUser facebookUser;
+
+	public void FBInit()
+    {
+        FB.Init(OnInitComplete);
+    }
+
+    public System.Action<JSONObject> Login_callback;
+    public void Login(System.Action<JSONObject> callback)
+    {
+        Login_callback = callback;
+        FB.LogInWithPublishPermissions(new List<string>() { "publish_actions", "public_profile", "user_friends" }, OnLoginComplete);
+    }
+
+    public void OnInitComplete()
+    {
+        Debug.Log("fb init: " + FB.IsInitialized);
+    }
+
+    public void OnLoginComplete(ILoginResult result)
+    {
+        if (result.Error != null)
+        {
+            Debug.Log("fb login error: " + result.Error);
+        }
+        else if (result.Cancelled)
+        {
+            Debug.Log("fb login: " + "Canceled by user");
+        }        
+        else
+        {
+            Debug.Log("fb login: " + result.RawResult);
+            JSONObject resultJson = new JSONObject(result.RawResult);
+            facebookUser = JsonUtility.FromJson<FacebookUser>(result.RawResult);
+            Login_callback(resultJson);
+        }
+    }
+
+    public System.Action<JSONObject> GetUserName_callback;
+    public void GetUserName(System.Action<JSONObject> callback)
+    {
+        GetUserName_callback = callback;
+        //right now this only gets the user name
+        FB.API("/me?fields=name", HttpMethod.GET, DoGetUserName);
+    }
+
+    public void DoGetUserName(IGraphResult result)
+    {
+        if (result.Error != null)
+        {
+            Debug.Log("fb user name error: " + result.Error);
+        }
+        else if (result.Cancelled)
+        {
+            Debug.Log("fb user name: " + "Canceled by user");
+        }
+        else
+        {
+            Debug.Log("fb user name: " + result.RawResult);
+            JSONObject resultJson = new JSONObject(result.RawResult);
+            facebookUser.name = resultJson.GetField("name").str;
+            GetUserName_callback(resultJson);
+        }
+    }
+
+    public void Logout()
+    {
+        // called in the logout api call
+        if (FB.IsInitialized && FB.IsLoggedIn)
+        {
+            Debug.Log("fb logout");
+            FB.LogOut();
+            facebookUser = null;
+        }
+    }
+
+    public System.Action<JSONObject> GetFriends_callback;
+    public void GetFriends(System.Action<JSONObject> callback)
+    {
+        GetFriends_callback = callback;
+        FB.API("/me/friends", HttpMethod.GET, DoGetFriends);
+    }
+
+    public void DoGetFriends(IGraphResult result)
+    {
+        if (result.Error != null)
+        {
+            Debug.Log("fb user friends error: " + result.Error);
+        }
+        else if (result.Cancelled)
+        {
+            Debug.Log("fb user friends: " + "Canceled by user");
+        }
+        else
+        {
+            Debug.Log("fb user friends: " + result.RawResult);
+            JSONObject resultJson = new JSONObject(result.RawResult);
+            facebookUser.friendsList = resultJson.GetField("data");
+            GetFriends_callback(resultJson);
+        }
+    }
+
+    public System.Action<Texture2D> GetUserPicture_callback;
+    public void GetUserPicture(System.Action<Texture2D> callback, string fbId, float width = 100, float height = 100)
+    {
+        GetUserPicture_callback = callback;
+        FB.API(fbId + "/picture?width=" + width + "& height=" + height, HttpMethod.GET, PictureCallBack);
+    }
+    void PictureCallBack(IGraphResult result)
+    {
+        if (result.Error != null)
+        {
+            Debug.Log("fb user picture error: " + result.Error);
+        }
+        else if (result.Cancelled)
+        {
+            Debug.Log("fb user picture: " + "Canceled by user");
+        }
+        else
+        {
+            Debug.Log("fb user picture: " + result.RawResult);
+            GetUserPicture_callback(result.Texture);
+        }
+    }
+}
+# This is not the best way to go about it but this is not about facebook, it's just a proof of concept at this point.
+```
 
