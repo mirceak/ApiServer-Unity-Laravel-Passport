@@ -1746,7 +1746,8 @@ public class UserProfileDetails : Api_Call
 response we move on.
 ```
 
-Okay, now make sure you download the official ```Facebook beta``` app from the asset store in unity.
+Okay, now make sure you download the official ```Facebook beta``` app from the asset store in unity and also get the ```JSON Object``` 
+asset from ```Defective Studios```.
 
 * Inside the ```Scripts``` folder create a new folder named ```"Facebook"```.
 * Inside the ```Facebook``` folder create a new c# class named ```"FacebookUser"``` and paste in this code:
