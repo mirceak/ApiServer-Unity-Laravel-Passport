@@ -220,6 +220,7 @@ with this:
 ```
 Route::post('/register', 'Api\ApiController@register');
 Route::middleware('auth:api')->get('/logout', 'Api\ApiController@logout');
+Route::middleware('auth:api')->post('/update', 'Api\ApiController@update');
 
 Route::middleware('auth:api')->get('/user', function (Request $request) {
     return $request->user()->toJson();
@@ -285,9 +286,6 @@ public function logout(Request $request)
     ];
     return response()->json($json, '200');
 }
-
-# This is our logout function. Here we revoke the user's token so that calls cannot be made on his behalf anymore and return a success
-message to the client app.
 ```
 * Paste in this code:
 ```
@@ -396,14 +394,6 @@ function register(Request $request)
     $status = ["success"=> "Registered User"];
     return $status;
 }
-    
-# In this function we can see we have it split in two major if statements that check wether the account is an guest account/an account
-registered with our own api/an facebook account. If we have an ```email``` parrameter in the ```$request``` parrameter then we know the
-user registered using our api and we validate the input then create a user based on that input and store it in our database. If we have
-an ```fbId``` in the ```$request``` parameter then we treat that request accodringly as we did with the previous one. If there are none
-of the above present we then know the user does not want to register so we register him with a guest account meaning we generate and
-assign him the data he did not want to provide us with. Within our client we will generate a unique id when the app is first run and
-store it so we can use it instead of a password and email or fbId. After all that is done we return a success message to the app client.
 ```
 
 Right now we set the user to have some fields we did not discuss for example the ```highscore / game money``` and so on. We need to
@@ -1824,3 +1814,8 @@ public class FacebookManager {
 # This is not the best way to go about it but this is not about facebook, it's just a proof of concept at this point.
 ```
 
+# At this point you have a client that communicates with a server and you can login or register users and you can edit and view
+# their data. You know how to add more fields to your database and how to handle those fields. That seems like a good start right :D?
+
+# I will stop writing in this readme file for a while starting now (I will only update in case I modify the files mentioned).
+# I will however continue updating the client and the server until I turn the repository into an open source multiplayer clicker game.
