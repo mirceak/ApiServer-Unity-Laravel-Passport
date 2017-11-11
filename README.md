@@ -586,19 +586,19 @@ using UnityEngine;
 using System;
 
 [Serializable]
-public class Api_Data  {
+public class Api_Data
+{
     //made null in logout api call
-    public Api_User user;    
+    public Api_User user;
     //Api_UserData class is defined inside Api_User
     public Api_UserData userData;
 
     public Api_Data()
     {
-        user = new ApiUser();
-        userData = new ApiUserData();
+        user = new Api_User();
+        userData = new Api_UserData();
     }
 }
-
 # This class will hold all the information we request from the internet.
 ```
 
@@ -637,7 +637,7 @@ public class Api_UserData
 
 All right, now we have something that can hold what we have setup inside our server. Now let's define some constants for it.
 
-* In the ```"SecuredData"``` folder we need to create a ```"Server_Constants"``` C# class.
+* In the ```"ServerApi"``` folder we need to create a ```"Server_Constants"``` C# class.
 * In that file paste this:
 ```
 using System;
@@ -700,7 +700,7 @@ to build api calls as GameObjects within unity so that destroying them would go 
 even for a novice user.
 
 First we should build a manager for the api calls we are going to make.
-* Inside the ```"ServerApi"``` folder create a new C# class named Manager_Api_Call.
+* Inside the ```"ServerApi"``` folder create a new C# class named ```"Manager_Api_Call"```.
 * Inside that class paste this:
 ```
 using System.Collections;
@@ -749,29 +749,38 @@ public class Manager_Api_Call {
         //create a params field and add it to the list and to the call so we can access it later.
         Api_Call_Params callParams = new Api_Call_Params(call, callback, data, type);
         calls.Add(callParams);
-        callParams.id = Random.ColorHSV().ToString() + Time.realtimeSinceStartup.ToString();
         call.callParams = callParams;
-
         //we only want to start one call at a time for this project so we need to check if there are any calls running or if we are just refreshing a token
         //the rest of the calls added to the list will be called after the last call dies
         if (calls.Count == 1 || call is RefreshToken)
         {
-            Server.instance.StartCoroutine(call.Initialize(data, ApiCallback));
+            InitiateCall(call, data, ApiCallback);
         }
     }
+
+    Api_Call _currentCall;
+    void InitiateCall(Api_Call call, JSONObject data, System.Action<JSONObject> callback)
+    {
+        _currentCall = call;
+        Server.instance.StartCoroutine(_currentCall.Initialize(data, callback));
+    }
+
     void ApiCallback(JSONObject data)
     {
-        // we override this to setup the refreshToken logic
-        if (data.HasField("error"))
+        Debug.Log("API CALL:" + _currentCall.callParams.type);
+        Debug.Log("API RESPONSE: " + data);
+        Debug.Log("___________________");
+        //we check for errors first
+        if (data.HasField("message"))
         {
             //we check if we need to refresh the token
-            if (data.GetField("error").str.Contains("401 Unauthorized"))
+            if (data.GetField("message").str.Contains("Unauthenticated"))
             {
+                //we don't propagate the callback anymore because the api call did not finish, it need to refesh the token first
                 Debug.Log("Refreshing");
                 RefreshToken();
                 return;
             }
-
         }
 
         //we call the current call's callback
@@ -798,7 +807,8 @@ public class Manager_Api_Call {
         {
             Api_Call_Params current_call_params;
             current_call_params = calls[0];
-            Server.instance.StartCoroutine(current_call_params.call.Initialize(current_call_params.data, ApiCallback));
+
+            InitiateCall(current_call_params.call, current_call_params.data, ApiCallback);
         }
         else
         {
@@ -812,14 +822,7 @@ public class Manager_Api_Call {
         //if the user does not exist we return an error
         if (Server.apiData.user.refresh_token != null)
         {
-            JSONObject data = new JSONObject();
-            data.AddField("grant_type", "refresh_token");
-            data.AddField("refresh_token", Server.apiData.user.refresh_token);
-            data.AddField("client_id", Server.client_id);
-            data.AddField("client_secret", Server.client_secret);
-            data.AddField("scope", "");
-
-            Generate_ApiCall(data, RefreshedToken, api_refreshToken);
+            Generate_ApiCall(null, RefreshedToken, api_refreshToken);
         }
         else
         {
@@ -832,17 +835,15 @@ public class Manager_Api_Call {
     {
         Debug.Log("RefreshedToken");
 
-        if (data.HasField("error"))
+        if (!string.IsNullOrEmpty(data.GetField("error").str))
         {
             //error from api
-            Debug.Log(data.GetField("error").str);
             ApiCallback(new JSONObject("{ " + '"' + "error" + '"' + " : " + '"' + " token refresh error! " + '"' + " }"));
             calls[0].call.DestroySelf();
         }
         else
         {
             //data from api
-            Debug.Log(data.GetField("data").str);
             //we don't need to do anything here because after the refresh token dies out it will reinitiate the api call that got locked
         }
     }
@@ -894,7 +895,7 @@ public class Manager_Api_Call {
 ```
 
 * Inside the ```"ServerApi"``` folder create a new folder named ```"Objects"``` and in that one create a folder named ```"Api"```. 
-Inside Api create a C# class named ```"Api_Call"```.
+Inside Api create a C# class named ```"Api_Call_Params"```.
 * Inside that class paste this:
 ```
 using System.Collections;
@@ -907,8 +908,7 @@ public class Api_Call_Params {
     public System.Action<JSONObject> callback = null;
     public JSONObject data = null;
     public string type = null;
-    public string id;
-
+ 
     public Api_Call_Params(Api_Call _call, System.Action<JSONObject> _callback, JSONObject _data, string _type)
     {
         call = _call;
@@ -927,56 +927,112 @@ Great! Now we have a functioning manager but we need actual calls.
 ```
 using System.Collections;
 using System.Collections.Generic;
+using UnityEngine.UI;
 using UnityEngine;
 
 public abstract class Api_Call : MonoBehaviour {
-    
+
     //api call details
     public string url;
-    public JSONObject status = new JSONObject();
+    public JSONObject status_text = new JSONObject();
+    
+    protected System.Action<JSONObject> _callback;
 
     public Api_Call_Params callParams;
     //
-    
-    protected System.Action<JSONObject> _callback;
+
+    //
+    public WWW www;
+    WWWForm _form_forRegisteredUser;
+    public WWWForm form_forRegisteredUser
+    {
+        get
+        {
+            if (_form_forRegisteredUser == null)
+            {
+                _form_forRegisteredUser = new WWWForm();
+                _form_forRegisteredUser.AddField("grant_type", Server.grant_type);
+                _form_forRegisteredUser.AddField("client_id", Server.client_id);
+                _form_forRegisteredUser.AddField("client_secret", Server.client_secret);
+            }
+
+            return _form_forRegisteredUser;
+        }
+    }
+    WWWForm _form_forGuestUser;
+    public WWWForm form_forGuestUser
+    {
+        get
+        {
+            if (_form_forGuestUser == null)
+            {
+                _form_forGuestUser = new WWWForm();
+            }
+
+            return _form_forGuestUser;
+        }
+    }
+    Hashtable _headers;
+    public Hashtable headers
+    {
+        get
+        {
+            if (_headers == null)
+            {
+                _headers = new Hashtable();
+                _headers.Add("Accept", "application/json");
+                _headers.Add("Authorization", "Bearer " + Server.apiData.user.access_token);
+            }
+
+            return _headers;
+        }
+    }
+    //
         
     public IEnumerator Initialize(JSONObject data, System.Action<JSONObject> callback)
     {
-        status.Clear();
+        status_text.Clear();
+        _headers = null;
+        _form_forGuestUser = null;
+        _form_forRegisteredUser = null;
+
         _callback = callback;
+
         //we call the inheriting class's Call method. this is set in other classes not this one
-        yield return Call(data);
+        Call(data);
+        yield return www;
+
+        status_text = new JSONObject(www.text);
+        status_text.AddField("error", new JSONObject(www.error));
+
+        ResponseCallback();
 
         //after the call has returned a message from the server we destroy the object. some classes will redefine this "Die" method
         Die();
     }
 
-    public abstract IEnumerator Call(JSONObject data);
-
     public virtual void Die()
     {
-        if (status.HasField("error") && !status.GetField("error").str.Contains("401 Unauthorized"))
+        //we check for errors first
+        if (status_text.HasField("message") && status_text.GetField("message").str.Contains("Unauthenticated"))
         {
-            //something went wrong we should not be here.
-            Debug.Log("Something went wrong with the request: " + status.GetField("error").str);
-        }else if (status.HasField("error") && status.GetField("error").str.Contains("401 Unauthorized"))
-        {
+            //we check if we need to refresh the token
             if (_callback != null)
-                _callback(status);
+                _callback(status_text);
             return;
         }
-
+        
         //if this call should call another function when it's finished it should do so now
         if (_callback != null)
-            _callback(status);
+            _callback(status_text);
 
         DestroySelf();
+
     }
 
     public void DestroySelf()
     {
-        //the end callback function can be used in classes that inherit this one to set custom event logic when this call is done loading. 
-        you will set whatever you want to happen
+        //the end callback function can be used in classes that inherit this one to set custom event logic when this call is done loading. you will set whatever you want to happen
         //at the end of each callback in the api call class that will inherit this one. you will use "public override void EndCallback() { code }".
         EndCallback();
 
@@ -987,7 +1043,10 @@ public abstract class Api_Call : MonoBehaviour {
         GameObject.Destroy(gameObject);
     }
 
-    public virtual void EndCallback() { }
+    public abstract void ResponseCallback();
+    public abstract void EndCallback();
+
+    public abstract void Call(JSONObject data);
 }
 # The code is pretty well commented out so feel free to look around and understand the logic. 
 ```
@@ -1001,9 +1060,11 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
+
 public class Server : MonoBehaviour
 {
-    public static Api_Data apiData = new Api_Data(); //this should be saved and loaded with playerprefs for offline play if it is desired (not safe, files could get hacked)
+    public static Api_Data apiData = new Api_Data(); //this should be saved and loaded with playerprefs
+    public static FacebookManager facebookManager = new FacebookManager();
 
     public static Server instance;
 
@@ -1014,9 +1075,9 @@ public class Server : MonoBehaviour
     }
 
     //api client details
-    public const string grant_type = "password"; //leave this as it is!
-    public const string client_id = "YOUR CLIENT ID HERE!!! INSTRUCTIONS IN THE # SECITON AT THE BOTTOM OF THIS STEP!!!";
-    public const string client_secret = "YOUR CLIENT SECRET HERE!!! INSTRUCTIONS IN THE # SECTION AT THE BOTTOM OF THIS STEP!!!";
+    public const string grant_type = "password";
+    public const string client_id = "3";
+    public const string client_secret = "GkYWeJsAxXVZxmn2vXDfIOkemdZLY2hn3wMy2Att";
     //
 
     //callbacks for ui
@@ -1073,6 +1134,10 @@ public class Server : MonoBehaviour
         manager_Api_Call.Logout(callback);
     }
     //
+
+
+
+
 
     //Example functions...
 
@@ -1146,29 +1211,9 @@ public class Server : MonoBehaviour
     }
     void OnRegisterFacebookLoginEnd(JSONObject status)
     {
-        Debug.Log("RegisteredFacebookLogin");
-        if (status.HasField("error"))
+        //data from api
+        if (status.HasField("success"))
         {
-            //error from api
-            Debug.Log(status.GetField("error").str);
-
-            JSONObject error = new JSONObject(status.GetField("error").str);
-            if (error.GetField("original")[0].str.Contains("The fb id has already been taken"))
-            {
-                //we already registered the user
-                LoginFacebookLogin();
-            }
-            else
-            {
-                //something went wrong
-                _LoadingEnd();
-            }
-        }
-        else
-        {
-            //data from api
-            Debug.Log(status.GetField("data").str);
-            
             LoginFacebookLogin();
         }
     }
@@ -1183,23 +1228,12 @@ public class Server : MonoBehaviour
     }
     void OnLoginFacebookLoginEnd(JSONObject status)
     {
-        Debug.Log("LoggedInFacebookLogin");
-        if (status.HasField("error"))
-        {
-            //error from api
-            Debug.Log(status.GetField("error").str);
-
-            _LoadingEnd();
-        }
-        else
-        {
-            //data from api
-            Debug.Log(status.GetField("data").str);
-
-            _LoadingEnd();
-        }
+        //data from api
     }
     //
+
+
+
 
     //Login Function
     public void FakeLoginUser()
@@ -1221,20 +1255,12 @@ public class Server : MonoBehaviour
     }
     void OnLoginEnd(JSONObject status)
     {
-        Debug.Log("LoggedIn");
-        if (status.HasField("error"))
-        {
-            //error from api
-            Debug.Log(status.GetField("error").str);
-        }
-        else
-        {
-            //data from api
-            Debug.Log(status.GetField("data").str);
-
-        }
+        //data from api
     }
     //
+
+
+
 
     //Login Function
     public void FakeFacebookLogin()
@@ -1256,25 +1282,16 @@ public class Server : MonoBehaviour
     }
     void OnFacebookLoginEnd(JSONObject status)
     {
-        Debug.Log("LoggedIn");
-        if (status.HasField("error"))
-        {
-            //error from api
-            Debug.Log(status.GetField("error").str);
-        }
-        else
-        {
-            //data from api
-            Debug.Log(status.GetField("data").str);
-
-        }
+        //data from api
     }
     //
+
+
 
     //Register Function
     public void FakeRegisterUser()
     {
-        RegisterUser("first", "first@mail.com", "password");
+        RegisterUser("first", "firsts@mail.com", "password");
     }
     public void RegisterUser(string name, string email, string password)
     {
@@ -1291,29 +1308,22 @@ public class Server : MonoBehaviour
     }
     void OnRegisterEnd(JSONObject status)
     {
-        Debug.Log("Registered");
-        if (status.HasField("error"))
+        //data from api
+        //the Register api call expects an immediate call to the Login api call
+        if (status.HasField("success"))
         {
-            //error from api
-            Debug.Log(status.GetField("error").str);
-        }
-        else
-        {
-            //data from api
-            Debug.Log(status.GetField("data").str);
-
-            //the Register api call expects an immediate call to the Login api call
             FakeLoginUser();
         }
     }
     //
 
+
     //RegisterGuest Function
     public void FakeRegisterGuestUser()
     {
-        RegisterGuestUser("first", "first@mail.com", "password");
+        RegisterGuestUser();
     }
-    public void RegisterGuestUser(string name, string email, string password)
+    public void RegisterGuestUser()
     {
         JSONObject data = new JSONObject();
         data.AddField("guestName", Server_Constants.GetUniqueIdentifier);
@@ -1326,22 +1336,15 @@ public class Server : MonoBehaviour
     }
     void OnRegisterGuestEnd(JSONObject status)
     {
-        Debug.Log("Registered Guest");
-        if (status.HasField("error"))
+        //data from api
+        //the Register api call expects an immediate call to the Login api call
+        if (status.HasField("success"))
         {
-            //error from api
-            Debug.Log(status.GetField("error").str);
-        }
-        else
-        {
-            //data from api
-            Debug.Log(status.GetField("data").str);
-
-            //the Register api call expects an immediate call to the Login api call
             FakeLoginGuestUser();
         }
     }
     //
+
 
     //Login Guest Function
     public void FakeLoginGuestUser()
@@ -1363,19 +1366,11 @@ public class Server : MonoBehaviour
     }
     void OnLoginGuestEnd(JSONObject status)
     {
-        Debug.Log("LoggedIn Guest");
-        if (status.HasField("error"))
-        {
-            //error from api
-            Debug.Log(status.GetField("error").str);
-        }
-        else
-        {
-            //data from api
-            Debug.Log(status.GetField("data").str);
-        }
+        //data from api
     }
     //
+
+
 
     //UserDetails Function
     public void FakeUserProfileDetails()
@@ -1388,19 +1383,11 @@ public class Server : MonoBehaviour
     }
     void OnUserProfileDetailsEnd(JSONObject status)
     {
-        Debug.Log("UserProfileDetails");
-        if (status.HasField("error"))
-        {
-            //error from api
-            Debug.Log(status.GetField("error").str);
-        }
-        else
-        {
-            //data from api
-            Debug.Log(status.GetField("data").str);
-        }
+        //data from api
     }
     //
+
+
 
     //Logout Function
     public void FakeLogout()
@@ -1413,17 +1400,7 @@ public class Server : MonoBehaviour
     }
     void OnFakeLogoutEnd(JSONObject status)
     {
-        Debug.Log("Logout");
-        if (status.HasField("error"))
-        {
-            //error from api
-            Debug.Log(status.GetField("error").str);
-        }
-        else
-        {
-            //data from api
-            Debug.Log(status.GetField("data").str);
-        }
+        //data from api
     }
     //
 }
@@ -1447,42 +1424,28 @@ using UnityEngine;
 
 public class Register : Api_Call
 {
-    public override IEnumerator Call(JSONObject data)
+    public override void Call(JSONObject data)
     {
         url = Server_Constants.serverApi_BaseUrl + "/api/register";
+        
+        form_forGuestUser.AddField("name", data.GetField("name").str);
+        form_forGuestUser.AddField("email", data.GetField("email").str);
+        form_forGuestUser.AddField("password", data.GetField("password").str);
 
-        WWWForm form = new WWWForm();
-        form.AddField("name", data.GetField("name").str);
-        form.AddField("email", data.GetField("email").str);
-        form.AddField("password", data.GetField("password").str);
+        www = new WWW(url, form_forGuestUser);
+    }
 
-        WWW www = new WWW(url, form);
-
-        yield return www;
-        if (!string.IsNullOrEmpty(www.error))
+    public override void ResponseCallback()
+    {
+        if (!status_text.HasField("success"))
         {
-            status.AddField("error", www.error);
-        }
-        else
-        {
-            status.AddField("data", www.text);
-
-            JSONObject wwwData = new JSONObject(www.text);
-            if (wwwData.HasField("success"))
-            {
-                status.AddField("success", www.text);
-            }
-            else
-            {
-                //credentials already used (account details not unique)
-                status.AddField("error", www.text);
-            }
+            //credentials already used (account details not unique)
         }
     }
 
-    //we expect an immediate login api call after this request so we don't call the LoadingEnd UI callback
     public override void EndCallback()
     {
+
     }
 }
 # Pretty straight forward, we make a form with the info we would need to register a user and then if we get a good 
@@ -1497,36 +1460,31 @@ using UnityEngine;
 
 public class Login : Api_Call
 {
-    public override IEnumerator Call(JSONObject data)
+    public override void Call(JSONObject data)
     {
         url = Server_Constants.serverApi_BaseUrl + "/oauth/token";
 
-        WWWForm form = new WWWForm();
-        form.AddField("grant_type", Server.grant_type);
-        form.AddField("client_id", Server.client_id);
-        form.AddField("client_secret", Server.client_secret);
-        form.AddField("username", data.GetField("username").str);
-        form.AddField("password", data.GetField("password").str);
+        form_forRegisteredUser.AddField("username", data.GetField("username").str);
+        form_forRegisteredUser.AddField("password", data.GetField("password").str);
+        form_forRegisteredUser.AddField("scope", data.GetField("scope").str);
+        
+        www = new WWW(url, form_forRegisteredUser);
+    }
 
-        form.AddField("scope", data.GetField("scope").str);
-
-        WWW www = new WWW(url, form);
-
-        yield return www;
-        if (!string.IsNullOrEmpty(www.error))
+    public override void ResponseCallback()
+    {
+        if (status_text.HasField("access_token"))
         {
-            status.AddField("error", www.error);
-        }
-        else
-        {
-            status.AddField("data", www.text);
-
-            JSONObject wwwData = new JSONObject(www.text);
             JSONObject serverUserData = new JSONObject();
-            serverUserData.AddField("access_token", wwwData.GetField("access_token").str);
-            serverUserData.AddField("refresh_token", wwwData.GetField("refresh_token").str);
+            serverUserData.AddField("access_token", status_text.GetField("access_token").str);
+            serverUserData.AddField("refresh_token", status_text.GetField("refresh_token").str);
             Server.manager_Api_Call.UpdateUser(serverUserData);
         }
+    }
+
+    public override void EndCallback()
+    {
+
     }
 }
 # Pretty straight forward, we make a form with the info we would need to login a user and then if we get a good 
@@ -1541,31 +1499,25 @@ using UnityEngine;
 
 public class Logout : Api_Call
 {
-    public override IEnumerator Call(JSONObject data = null)
+    public override void Call(JSONObject data = null)
     {
         url = Server_Constants.serverApi_BaseUrl + "/api/logout";
+        
+        www = new WWW(url, null, headers);
+    }
 
-        Hashtable headers = new Hashtable();
-        headers.Add("Accept", "application/json");
-        headers.Add("Authorization", "Bearer " + Server.apiData.user.access_token);
-        WWW www = new WWW(url, null, headers);
+    public override void ResponseCallback()
+    {
 
-        yield return www;
-        if (!string.IsNullOrEmpty(www.error))
-        {
-            status.AddField("error", www.error);
-        }
-        else
-        {
-            status.AddField("data", www.text);
-        }
     }
 
     public override void EndCallback()
     {         
-        if (!status.HasField("error"))
+        if (status_text.HasField("success"))
         {
             Server.apiData.user = new Api_User();
+
+            Server.facebookManager.Logout();
         }
     }
 }
@@ -1581,33 +1533,31 @@ using UnityEngine;
 
 public class RefreshToken : Api_Call
 {
-    public override IEnumerator Call(JSONObject data)
+    public override void Call(JSONObject data)
     {
         url = Server_Constants.serverApi_BaseUrl + "/oauth/token";
+        
+        form_forRegisteredUser.AddField("grant_type", "refresh_token");
+        form_forRegisteredUser.AddField("refresh_token", Server.apiData.user.refresh_token);
+        form_forRegisteredUser.AddField("scope", "");
 
-        WWWForm form = new WWWForm();
-        form.AddField("grant_type", data.GetField("grant_type").str);
-        form.AddField("refresh_token", data.GetField("refresh_token").str);
-        form.AddField("client_id", data.GetField("client_id").str);
-        form.AddField("client_secret", data.GetField("client_secret").str);
-        form.AddField("scope", data.GetField("scope").str);
-        WWW www = new WWW(url, form);
+        www = new WWW(url, form_forRegisteredUser);
+    }
 
-        yield return www;
-        if (!string.IsNullOrEmpty(www.error))
+    public override void ResponseCallback()
+    {
+        if (status_text.HasField("access_token"))
         {
-            status.AddField("error", www.error);
-        }
-        else
-        {
-            status.AddField("data", www.text);
-
-            JSONObject wwwData = new JSONObject(www.text);
             JSONObject serverUserData = new JSONObject();
-            serverUserData.AddField("access_token", wwwData.GetField("access_token").str);
-            serverUserData.AddField("refresh_token", wwwData.GetField("refresh_token").str);
+            serverUserData.AddField("access_token", status_text.GetField("access_token").str);
+            serverUserData.AddField("refresh_token", status_text.GetField("refresh_token").str);
             Server.manager_Api_Call.UpdateUser(serverUserData);
         }
+    }
+
+    public override void EndCallback()
+    {
+
     }
 }
 # Pretty straight forward, we make a form with the info we would need to refresh a token and then if we get a good 
@@ -1623,38 +1573,23 @@ using UnityEngine;
 public class RegisterGuest : Api_Call
 {
 
-    public override IEnumerator Call(JSONObject data)
+    public override void Call(JSONObject data)
     {
         url = Server_Constants.serverApi_BaseUrl + "/api/register";
 
-        WWWForm form = new WWWForm();
-        form.AddField("guestName", data.GetField("guestName").str);
+        form_forGuestUser.AddField("guestName", data.GetField("guestName").str);
 
-        WWW www = new WWW(url, form);
+        www = new WWW(url, form_forGuestUser);
+    }
 
-        yield return www;
-        if (!string.IsNullOrEmpty(www.error))
+    public override void ResponseCallback()
+    {
+        if (!status_text.HasField("success"))
         {
-            status.AddField("error", www.error);
-        }
-        else
-        {
-            status.AddField("data", www.text);
-
-            JSONObject wwwData = new JSONObject(www.text);
-            if (wwwData.HasField("success"))
-            {
-                status.AddField("success", www.text);
-            }
-            else
-            {
-                //credentials already used (account details not unique)
-                status.AddField("error", www.text);
-            }
+            //credentials already used (account details not unique)
         }
     }
 
-    //we expect an immediate login api call after this request so we don't call the LoadingEnd UI callback
     public override void EndCallback()
     {
 
@@ -1672,42 +1607,28 @@ using UnityEngine;
 
 public class RegisterFacebook : Api_Call
 {
-    public override IEnumerator Call(JSONObject data)
+    public override void Call(JSONObject data)
     {
         url = Server_Constants.serverApi_BaseUrl + "/api/register";
 
-        WWWForm form = new WWWForm();
-        form.AddField("name", data.GetField("name").str);
-        form.AddField("fbId", data.GetField("fbId").str);
-        form.AddField("password", data.GetField("password").str);
+        form_forGuestUser.AddField("name", data.GetField("name").str);
+        form_forGuestUser.AddField("fbId", data.GetField("fbId").str);
+        form_forGuestUser.AddField("password", data.GetField("password").str);
 
-        WWW www = new WWW(url, form);
+        www = new WWW(url, form_forGuestUser);
+    }
 
-        yield return www;
-        if (!string.IsNullOrEmpty(www.error))
+    public override void ResponseCallback()
+    {
+        if (!status_text.HasField("success"))
         {
-            status.AddField("error", www.error);
-        }
-        else
-        {
-            status.AddField("data", www.text);
-
-            JSONObject wwwData = new JSONObject(www.text);
-            if (wwwData.HasField("success"))
-            {
-                status.AddField("success", www.text);
-            }
-            else
-            {
-                //credentials already used (account details not unique)
-                status.AddField("error", www.text);
-            }
+            //credentials already used (account details not unique)
         }
     }
 
-    //we expect an immediate login api call after this request so we don't call the LoadingEnd UI callback
     public override void EndCallback()
     {
+
     }
 }
 # Pretty straight forward, we make a request with the info we would need to register a facebook user and then if we get a good 
@@ -1722,24 +1643,21 @@ using UnityEngine;
 
 public class UserProfileDetails : Api_Call
 {
-    public override IEnumerator Call(JSONObject data = null)
+    public override void Call(JSONObject data)
     {
         url = Server_Constants.serverApi_BaseUrl + "/api/user";
 
-        Hashtable headers = new Hashtable();
-        headers.Add("Accept", "application/json");
-        headers.Add("Authorization", "Bearer " + Server.apiData.user.access_token);
-        WWW www = new WWW(url, null, headers);
+        www = new WWW(url, null, headers);
+    }
 
-        yield return www;
-        if (!string.IsNullOrEmpty(www.error))
-        {
-            status.AddField("error", www.error);
-        }
-        else
-        {
-            status.AddField("data", www.text);
-        }
+    public override void ResponseCallback()
+    {
+
+    }
+
+    public override void EndCallback()
+    {
+
     }
 }
 # Pretty straight forward, we make a request with the info we would need to register a facebook user and then if we get a good 
