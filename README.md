@@ -1212,7 +1212,7 @@ public class Server : MonoBehaviour
     void OnRegisterFacebookLoginEnd(JSONObject status)
     {
         //data from api
-        if (status.HasField("success"))
+        if (status.HasField("success") || (status.HasField("original") && status.GetField("original")[0].str.Contains("The fb id has already been taken.")) )
         {
             LoginFacebookLogin();
         }
@@ -1406,7 +1406,6 @@ public class Server : MonoBehaviour
 }
 # The code is pretty well commented out so feel free to look around and understand the logic. You have examples for about 
 everything you will need to login/register/view/edit a user.
-
 ```
 
 Now we're all set to build and run the api calls we are using in the ```Server.cs``` we have just made.
